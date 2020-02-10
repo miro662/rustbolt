@@ -15,26 +15,34 @@ impl BoltSerializable for bool {
 
 impl BoltSerializable for i64 {
     fn bolt_serialize(&self) -> Vec<u8> {
-        unsafe {
-            let data_be = self.to_be();
-            let raw_data = mem::transmute::<i64, [u8; 8]>(data_be);
-            if (*self) >= -16 && (*self) <= 127 {
-                // TINY_INT
-                vec![raw_data[7]]
-            } else if (*self) >= -128 && (*self) <= 127 {
-                // INT_8
-                vec![0xC8, raw_data[7]]
+        let raw_data = self.to_be_bytes();
+        if (*self) >= -16 && (*self) <= 127 {
+            // TINY_INT
+            vec![raw_data[7]]
+        } else {
+            let (header, bytes): (u8, usize) = if (*self) >= -128 && (*self) <= 127 {
+                (0xC8, 1)
             } else if (*self) >= -32768 && (*self) <= 32767 {
-                // INT_16
-                vec![0xC9, raw_data[6], raw_data[7]]
+                (0xC9, 2)
             } else if (*self) >= -2147483648 && (*self) <= 2147483647 {
-                // INT_32
-                vec![0xCA, raw_data[4], raw_data[5], raw_data[6], raw_data[7]]
+                (0xCA, 4)
             } else {
-                // INT_64
-                vec![0xCB, raw_data[0], raw_data[1], raw_data[2], raw_data[3], raw_data[4], raw_data[5], raw_data[6], raw_data[7]]
-            }
+                (0xCB, 8)
+            };
+            
+            let mut data = vec![header];
+            data.extend(raw_data[(8 - bytes)..8].iter());
+            data
         }
+    }
+}
+
+impl BoltSerializable for f64 {
+    fn bolt_serialize(&self) -> Vec<u8> {
+        let raw_data = self.to_be_bytes();
+        let mut data = vec![0xC1];
+        data.extend(raw_data.iter());
+        data
     }
 }
 
@@ -98,6 +106,19 @@ mod tests {
         assert_eq!(
             vec![0xCB, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], 
             (9223372036854775807i64).bolt_serialize()
+        );
+    }
+
+    #[test]
+    fn f64_serialized_correctly_to_bolt() {
+        assert_eq!(
+            vec![0xC1, 0x3F, 0xF1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9A], 
+            (1.1).bolt_serialize()
+        );
+
+        assert_eq!(
+            vec![0xC1, 0xBF, 0xF1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9A], 
+            (-1.1).bolt_serialize()
         );
     }
 }
